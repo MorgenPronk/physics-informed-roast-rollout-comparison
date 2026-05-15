@@ -1,0 +1,314 @@
+\documentclass[fleqn,10pt]{wlscirep}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage[section]{placeins}
+\usepackage{url}
+\usepackage[colorinlistoftodos,prependcaption,textsize=footnotesize]{todonotes}
+
+\title{Physics-informed ML repair of mechanistic ODEs under missing initialization: a like-for-like comparison of plug-in positions}
+
+\author[1,*]{Morgen Pronk}
+\author[1]{Brian W. Anthony}
+\affil[1]{Massachusetts Institute of Technology, Cambridge, MA, USA}
+\affil[*]{morgenpronk@alum.mit.edu}
+
+\begin{abstract}
+Industrial production processes are typically governed by well-established physical laws, but the run-specific information that mechanistic models need (initial latent states, material properties, and startup conditions) is routinely missing or unreliable in routine production records. Physics-informed machine learning (PIML) is a method to make up for this knowledge gap and repair mechanistic models. This study focuses on comparing one major design choice for PIML: \emph{where} the learned neural network attaches to the mechanistic ODE. Using industrial coffee roasting as a positive-control case study (the published heat- and mass-transfer ODE reaches rollout $R^2 \approx 0.93$ when correctly parameterized; the realistic regime is constructed by withholding that parameterization), we compare four PIML repair positions and a matched-input neural baseline as a six-row position spectrum on a 221-roast production cohort. Every learned component is a feedforward MLP, so the only varied factor is the plug-in point relative to the ODE. The positions tested are nowhere (mechanistic model), inside the ODE as one or three learned closures, on top of the rollout as a bounded or unbounded additive correction, or standalone (pure MLP baseline). Three structural findings emerge. First, PIML repair strategies share their hard roasts with one another (per-roast Pearson $r \approx 0.5$--$0.9$) while the matched-input neural baseline has near-orthogonal errors ($r \approx 0$): the two approaches reach a comparable predictive ceiling through structurally different failure profiles. Second, a physics-motivated bound on the residual correction costs more than it buys: the unbounded variant uses 3.7$\times$ fewer parameters and gains $+0.02$ R$^2$ because the bounded variant spends capacity fighting its $\tanh$ constraint. Third, seed stability varies by more than an order of magnitude across PIML strategies (range $0.004$ to $0.117$ R$^2$ across three retraining seeds): out-of-scaffold residual repair is the most reproducible, the highest-R$^2$ in-scaffold strategy is the least. Supporting the structural findings, the four PIML repairs lift the rollout from $R^2 = -0.44$ to between $0.70$ and $0.94$, and the matched-input neural baseline reaches $0.97$ with 705 parameters, 3--20$\times$ fewer than every PIML repair tested. Because the case study sits in PIML's favorable regime (correct physics form, missing only run-specific initialization), this ordering is conservative for the harder cases where PIML is typically deployed.
+
+\end{abstract}
+
+\begin{document}
+\flushbottom
+\maketitle
+\thispagestyle{empty}
+
+\section*{Introduction}
+
+Industrial production processes are typically governed by well-established physical laws, but identifying predictive models for simulation or control from routine production telemetry remains difficult for a reason that goes beyond the physics itself: the run-specific information that mechanistic models need is rarely fully recorded. Material properties, operating conditions at the start of a run, and the initial values of unobserved latent state variables are routinely guessed, estimated, or absent in archival production records~\cite{ljung1999,pillonetto2025}. This pattern is documented across process industries where mechanistic understanding precedes per-run observability, including bioreactor cultivation, semiconductor process control, polymer extrusion, and food processing. Mechanistic models built on such records must therefore infer run-specific initialization from observables at startup, in addition to or in place of using literature priors that may not apply uniformly across runs. When this initialization step fails (and on small or homogeneous production cohorts it commonly does), the rollout of the mechanistic state evolution drifts even when the underlying physics is approximately correct. This trajectory deficit is the failure mode that physics-informed machine learning (PIML) can be deployed to repair.
+
+Several PIML strategies have been proposed for this purpose: learning unresolved closure terms within the mechanistic ODE while preserving its structure~\cite{psichogios1992,vonStosch2014,karniadakis2021,rackauckas2020universal}; adding residual neural corrections on top of a mechanistic rollout~\cite{kennedy2001bayesian,vonStosch2014}; or training unconstrained neural sequence models that bypass the physics entirely while remaining matched on measured inputs~\cite{ljung1999,pillonetto2025}. Each strategy makes a different tradeoff between parameter efficiency, training cost, and predictive capacity. Each strategy is well established individually; the contribution of this paper is a like-for-like, validation-selected comparison of all four against an unconstrained neural baseline on production data where the mechanistic scaffold is incompletely specified by missing run-specific metadata. The practical question for system identification on such data is not whether PIML is beneficial in principle, but which repair strategy is most effective in practice, and how each compares to an unconstrained neural baseline that does not attempt to repair physics at all.
+
+Industrial coffee roasting is a well-suited case study for this comparison: two independent lines of evidence indicate that the underlying physics is approximately correct, in both model form and parameterization. The model form is well-established by a substantial mechanistic literature, including coupled heat- and mass-transfer descriptions of bean temperature evolution~\cite{schwartzberg2002,vosloo2017,putranto2012,hernandez2007,fabbri2011}. The parameterization is supported empirically on this cohort: when literature values for the kinetic and heat-transfer parameters are used and only small data-driven corrections are fitted on top of them, the published ODE reproduces these trajectories at rollout $R^2 \approx 0.93$ (verified in Methods). Together these mean that rollout failure in the experimental regime evaluated below is mostly attributable to missing run-specific initialization rather than to model-form or parameter mis-specification. Thus, the experiment does not ask whether a fully anchored literature model can be improved from an already high $R^2 \approx 0.93$ baseline; it asks how different PIML plug-in positions repair the more common production-data regime in which the ODE form is credible but run-specific initialization and anchoring metadata are unavailable.
+
+Starting from the priors-equipped $R^2 \approx 0.93$ model would leave little dynamic range for comparing repair strategies. We therefore evaluate the metadata-limited variant: the same mechanistic scaffold is used, but run-specific latent initialization and anchoring priors are not supplied. This isolates the repair role of PIML under a failure mode that is common in archival industrial telemetry.
+
+We compare four physics-informed repair strategies against an unconstrained neural baseline. The first two repair strategies place learned MLPs \emph{inside} the mechanistic ODE: a single-closure variant that replaces only the heat-transfer coefficient $h_e$ with a learned function of measured drivers, and a multi-closure variant that additionally replaces the moisture-loss and exothermic reaction rates with bounded learned MLPs. The next two repair strategies place a learned MLP \emph{on top of} the mechanistic rollout as an additive correction: a bounded variant in which the correction is constrained to a small temperature-space neighborhood of the mechanistic prediction, and an unbounded variant in which the correction is free. The reference model is a matched-input feedforward neural baseline that operates on the same measured drivers as all four repair strategies but with no mechanistic scaffold. Every learned component in the comparison (the closure MLPs inside the ODE, the additive correction MLP on top of the rollout, and the standalone baseline MLP) is a feedforward MLP with hidden architecture selected independently for each class by validation-rollout random search; the comparison axis is therefore where the MLP plugs in relative to the mechanistic ODE, not what kind of network is used.
+
+Each model class is independently tuned over a 40-trial sweep and retrained at a shared training budget across three seeds on a 221-roast production cohort with deterministic whole-roast hash splits. The comparison characterizes each repair method's contribution along five axes: rollout $R^2$ on held-out roasts, parameter efficiency, training compute cost, training reproducibility (seed-stability range across three retrains), and per-roast failure-mode structure. The findings inform method choice for hybrid physics-informed system identification on production data where reliable run-specific metadata is unavailable.
+
+\section*{Results}
+
+The results report held-out autonomous-rollout performance on the fixed production benchmark described in Methods. We first summarize the evaluation cohort and split, then compare the mechanistic baseline, the four physics-informed repair strategies (single-closure PI, multi-closure PI, bounded FF residual, and unbounded FF residual), and the matched-input neural baseline. All four PIML repair strategies recover substantial predictive trajectory fidelity from a mechanistic baseline under learned per-batch initialization. On rollout accuracy alone, the strongest PIML repairs and the neural baseline are statistically tied (bootstrap-CIs overlap), but the neural baseline reaches that ceiling with 3 to 20 times fewer parameters, faster training, and a different per-roast failure pattern.
+
+\subsection*{A metadata-indexed production cohort anchors the comparison}
+
+Held-out evaluation used a fixed 221-roast production cohort drawn from one source bucket and three recurring roast labels. After trimming each roast to the bean-charge-to-dump modeled window, deterministic whole-roast hash splitting produced 150 training roasts, 35 validation roasts, and 36 held-out test roasts. The trimmed sequences had a mean modeled length of 68.4 samples, for 15,113 total modeled steps. No rows from a held-out roast appeared in training or validation. All rollout metrics below are reported on the held-out test roasts.
+
+\subsection*{The six-class position spectrum at a glance}
+
+Table~\ref{tab:rollout_summary} summarizes held-out rollout performance for all six model classes, ordered by where the learned MLP attaches to the mechanistic ODE: nowhere (row 1, the mechanistic baseline), inside the ODE as one or three learned closures (rows 2--3), on top of the ODE rollout as a bounded or unbounded additive correction (rows 4--5), and standalone with no scaffold (row 6). The table reports the seed-11 held-out rollout $R^2$ with bootstrap CI, RMSE, and trainable-parameter count for each class; Figure~\ref{fig:position_spectrum} reproduces the same accuracy axis below alongside per-seed reproducibility across seeds 11/23/37 and parameter count on log scale. The subsections that follow walk through each repair group in turn (in-scaffold, on top of the rollout, standalone), then return to the cross-class structural findings on seed stability and per-roast failure-mode correlation.
+
+\begin{table}[ht]
+\centering
+\small
+\begin{tabular}{|l|c|c|c|c|c|}
+\hline
+Position / model & Where the MLP plugs in & Rollout $R^2$ & 95\% CI & RMSE [$^\circ$C] & Params \\
+\hline
+1.~Mechanistic baseline & none (mechanistic only) & $-0.4376$ & $[-0.6551,\,-0.2164]$ & 41.79 & 369 \\
+2.~Single-closure PI & inside ODE ($h_e$ only) & $0.7027$ & $[0.6480,\,0.7611]$ & 19.00 & 11{,}250 \\
+3.~Multi-closure PI & inside ODE (three relations) & $0.9436$ & $[0.9165,\,0.9717]$ & 8.28 & 14{,}196 \\
+4.~Bounded FF residual & on top of ODE, $\pm 24$~K bound & $0.8963$ & $[0.8566,\,0.9386]$ & 11.23 & 8{,}961 \\
+5.~Unbounded FF residual & on top of ODE, no bound & $0.9158$ & $[0.8869,\,0.9468]$ & 10.11 & 2{,}433 \\
+6.~Neural baseline & standalone (no ODE) & $0.9697$ & $[0.9560,\,0.9805]$ & 6.07 & 705 \\
+\hline
+\end{tabular}
+\caption{Held-out autonomous-rollout metrics on the 221-roast production cohort, seed 11. Each model class was tuned by an independent 40-trial validation-rollout random search and then retrained at the manuscript-canonical training budget across seeds 11/23/37; reported values are seed 11. Intervals are 95\% roast-bootstrap intervals for pooled rollout $R^2$. The six positions vary by \emph{where} a feedforward MLP is plugged in relative to the mechanistic ODE: none (row 1), inside the ODE as one or three learned closure terms (rows 2--3), on top of the ODE rollout as a bounded or unbounded additive correction (rows 4--5), or standalone with no physics (row 6).}
+\label{tab:rollout_summary}
+\end{table}
+
+\begin{figure}[!htbp]
+\centering
+\includegraphics[width=\linewidth]{figures/position_spectrum.pdf}
+\caption{Position spectrum across the six model classes (Table~\ref{tab:rollout_summary}). \textbf{Top:} Held-out autonomous-rollout $R^2$ at seed 11 with 95\% roast-bootstrap CI. The mechanistic baseline anchors the spectrum near $R^2 = -0.44$; every PIML repair strategy lifts the rollout above $0.70$, and the matched-input neural baseline reaches the highest accuracy at $R^2 = 0.97$. \textbf{Middle:} Per-seed rollout $R^2$ across retraining seeds 11/23/37 with the range $\Delta$ annotated. The multi-closure PI is the highest-R$^2$ physics-informed repair but also the least seed-stable ($\Delta = 0.117$, one seed under-converging); both FF-residual variants are the tightest ($\Delta \le 0.008$). \textbf{Bottom:} Trainable-parameter count (log scale). Every PIML repair uses at least three times the parameters of the neural baseline. Colors mark the position of the MLP relative to the ODE: gray for none, blue for inside the ODE, orange for on top of the ODE rollout, green for standalone.}
+\label{fig:position_spectrum}
+\end{figure}
+\FloatBarrier
+
+\subsection*{Learned closures inside the ODE repair the rollout}
+
+The single-closure PI (row 2 of Table~\ref{tab:rollout_summary}) is the simplest in-scaffold repair: it replaces the constant heat-transfer coefficient $h_e$ with a learned MLP on $(T_g, v_g, TT)$, leaving the rest of the mechanistic state evolution intact. This single-closure repair lifts rollout $R^2$ from $-0.4376$ to $0.7027$ with bootstrap interval $[0.6480,\,0.7611]$, and reduces RMSE to 19.00~$^\circ$C. The repair is statistically separated from the mechanistic baseline but well below the unconstrained neural-baseline ceiling reported below.
+
+The multi-closure PI (row 3) extends the same in-scaffold strategy to learn three physical relations simultaneously (the heat-transfer closure $h_e$, the moisture-loss rate $\dot{X}_b$, and the exothermic reaction rate $\dot{H}_e$), raising rollout $R^2$ to $0.9436$ with bootstrap interval $[0.9165,\,0.9717]$ and RMSE 8.28~$^\circ$C. Each rate is replaced by a bounded feedforward MLP that produces a non-positive (moisture) or non-negative (reaction) rate scaling the mechanistic default at zero-initialization. The multi-closure repair therefore tests whether the residual mechanistic deficit is concentrated in one closure or distributed across several physical relations. The substantial improvement over single-closure repair ($+0.24$ R$^2$ at the same training budget) indicates that the moisture and reaction kinetics, not only the heat-transfer relation, contribute to the mechanistic baseline's rollout drift on this cohort.
+
+Multi-closure repair, however, comes with wider seed sensitivity (Figure~\ref{fig:position_spectrum}). Across seeds 11/23/37 the test rollout $R^2$ ranges from $0.8265$ to $0.9436$ (range $0.117$), with one of three seeds collapsing to the lower end. The single-closure repair is markedly more stable (range $0.006$ across the same seeds), consistent with the increased training-dynamics interactions that arise when three coupled rate closures are learned jointly.
+
+\subsection*{Residual corrections on top of the ODE rollout repair from outside the scaffold}
+
+The on-top repair strategy (rows 4--5 of Table~\ref{tab:rollout_summary}) leaves the mechanistic ODE unchanged and learns an additive correction $\delta_t$ applied to the rollout's predicted temperature at each step. The correction is produced by a feedforward MLP whose inputs are the current corrected temperature and the same measured drivers $(T_2, v_g, TT)$ used by the neural baseline below. Two variants are reported: a bounded residual in which $\delta_t = \mathrm{max\_delta} \cdot \tanh(\mathrm{MLP}(\cdot))$ with a physical bound (the residual is constrained to a small additive correction in the temperature-space neighborhood of the mechanistic rollout), and an unbounded residual in which $\delta_t$ is the raw MLP output (the residual can override the mechanistic prediction entirely).
+
+The bounded residual repair reaches rollout $R^2 = 0.8963$ with bootstrap interval $[0.8566,\,0.9386]$ and RMSE 11.23~$^\circ$C; the bound (selected as $\pm 24$~K by the validation-rollout sweep) constrains the learned correction to remain a small perturbation of the mechanistic rollout rather than a free prediction. The unbounded residual repair, evaluated under the same architecture-family search space but with the bound removed, reaches $R^2 = 0.9158$ with bootstrap interval $[0.8869,\,0.9468]$ and RMSE 10.11~$^\circ$C. The unbounded variant therefore achieves higher predictive accuracy than the bounded variant, and it does so with substantially fewer learned parameters (2{,}433 vs 8{,}961, a 3.7-fold reduction). The bound was forcing the bounded residual to use more capacity to stay close to the mechanistic prediction; relaxing the bound lets the model find a more compact solution. Both residual variants are highly seed-stable: the bounded variant has a seed-stability range of $0.004$ across seeds 11/23/37 and the unbounded variant a range of $0.008$, both the tightest of any model class in the spectrum.
+
+\subsection*{The matched-input neural baseline reaches the predictive ceiling}
+
+The matched-input neural baseline (row 6 of Table~\ref{tab:rollout_summary}) is a feedforward MLP that operates on the same measured drivers as the physics-informed model (previous $T_c$, inlet-air temperature $T_2$, air speed $v_g$, and drum speed $TT$) and predicts the next $T_c$ directly with no mechanistic scaffold. On this cohort it reaches rollout $R^2 = 0.9697$ with bootstrap interval $[0.9560,\,0.9805]$, the highest of any model in the comparison.
+
+After hyperparameter selection, the matched-input baseline that wins on the validation split is a compact two-hidden-layer MLP $(32 \rightarrow 16)$ with only 705 trainable parameters, more than an order of magnitude smaller than either the single-closure physics-informed MLP (11{,}250 parameters) or the multi-closure physics-informed model (14{,}196 parameters), and somewhat smaller than the bounded FF residual (8{,}961 parameters). The smallest architecture in the search space was therefore selected for the neural baseline, and it still exceeds the predictive performance of every physics-informed repair configuration on the cohort's held-out test split. The parameter-efficiency comparison runs in the opposite direction from the usual physics-informed motivation.
+
+Compared with the strongest physics-informed repair (multi-closure, $R^2 = 0.9436$), the neural baseline's median roast-level advantage is small in absolute terms: a paired Wilcoxon signed-rank test on per-roast rollout $R^2$ yields $p = 0.32$, and a TOST equivalence test at $\varepsilon = 0.02$ gives $p = 0.27$. The two models are neither significantly different on median per-roast performance nor formally equivalent within $\pm 0.02$ R$^2$. Compared with the single-closure repair ($R^2 = 0.7027$), the baseline outperforms on all 36 held-out roasts (paired Wilcoxon $p = 2.91 \times 10^{-11}$).
+
+\subsection*{Seed stability differs sharply across repair strategies}
+
+The repair strategies differ markedly in how reproducibly they reach their reported R$^2$. Across seeds 11/23/37, the per-class test-rollout R$^2$ ranges are: mechanistic baseline $[-1.67, -0.44]$ (range $1.23$, reflecting its sensitivity to learned initial-state inference); single-closure PI $[0.6970, 0.7027]$ (range $0.006$); multi-closure PI $[0.8265, 0.9436]$ (range $0.117$, with one of three seeds collapsing to the lower end as discussed above); bounded FF residual $[0.8923, 0.8963]$ (range $0.004$, the tightest of any class); unbounded FF residual $[0.9107, 0.9189]$ (range $0.008$); and matched-input neural baseline $[0.9414, 0.9697]$ (range $0.028$). Both residual variants are therefore among the most reproducible repair strategies, while the multi-closure PI, the highest-R$^2$ physics-informed repair, is the least reproducible. Practical implication: multi-closure repair gains roughly $+0.03$ R$^2$ over the unbounded residual but at the cost of more than an order of magnitude increase in seed sensitivity, with occasional severe under-convergence on unfortunate initializations.
+
+\subsection*{Repair strategies and the neural baseline reach the same R$^2$ ceiling through different per-roast failure modes}
+
+Per-roast Pearson correlations between the top trial of each class (seed 11) characterize how the strategies fail differently even when they achieve similar overall R$^2$. The four physics-informed repairs intercorrelate strongly with one another on per-roast scores: single-closure vs multi-closure $r = +0.59$, single-closure vs bounded FF residual $r = +0.92$, single-closure vs unbounded FF residual $r = +0.78$, multi-closure vs bounded FF residual $r = +0.65$, multi-closure vs unbounded FF residual $r = +0.53$, bounded vs unbounded FF residual $r = +0.94$. All these positive correlations reflect a shared mechanistic-scaffold failure-mode pattern. The matched-input neural baseline, by contrast, has near-zero per-roast correlation with every physics-informed repair (single-closure: $r = -0.01$; multi-closure: $r = -0.17$; bounded FF residual: $r = -0.03$; unbounded FF residual: $r = -0.01$). Same predictive ceiling, structurally different per-roast failure profiles. The physics-informed repairs share their hard roasts with one another; the neural baseline finds different roasts hard (Figure~\ref{fig:per_roast_corr}).
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=0.85\linewidth]{figures/per_roast_correlation_heatmap.pdf}
+\caption{Pearson correlation between per-roast rollout $R^2$ vectors across the six model classes (seed 11, 36 held-out test roasts). The four PIML repair strategies (rows/columns 2--5) form a high-correlation block ($r \approx 0.5$--$0.9$), indicating that they share their hard roasts with one another. The matched-input neural baseline (row/column 6) is the dark-band exception: its per-roast hardness is near-orthogonal to every PIML repair ($|r| \le 0.17$), so the two approaches reach a comparable predictive ceiling through structurally different per-roast failure profiles.}
+\label{fig:per_roast_corr}
+\end{figure}
+\FloatBarrier
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=\linewidth]{figures/representative_rollouts.pdf}
+\caption{Representative held-out rollout on the deterministic-longest test roast (seed 11) for all six model classes in the position spectrum (Table~\ref{tab:rollout_summary}). The measured bean-probe trace is shown in black. Mechanistic baseline (gray dotted) drifts substantially upward after the charge-drop transient. Within each repair location, the two variants are paired by linestyle: single-closure PI (dashed blue) and multi-closure PI (solid blue) for inside-the-ODE repair; bounded FF residual (dashed orange) and unbounded FF residual (solid orange) for on-top-of-ODE repair. The matched-input neural baseline (green) tracks the measured trajectory most closely. Per-roast rollout $R^2$ values for this specific roast are annotated in the legend and may differ from the cohort-pooled values in Table~\ref{tab:rollout_summary}.}
+\label{fig:representative_rollouts}
+\end{figure}
+\FloatBarrier
+
+\section*{Discussion}
+
+In this production cohort, the mechanistic baseline (a literature-grounded model that must infer run-specific initialization because the supporting metadata is unavailable) fails as an autonomous simulator. Each of the four PIML repair strategies recovers substantial predictive trajectory fidelity from that baseline. Multi-closure repair and the unbounded FF residual reach within $\sim 0.05$ R$^2$ of the matched-input neural baseline, single-closure repair and bounded residual repair reach further-but-still-substantial fractions of the gap, and all four use feedforward MLPs in different positions relative to the mechanistic ODE so that the comparison axis is the position of the MLP rather than its architecture. The practical headline is therefore qualitative: physics-informed scaffolding consistently repairs the mechanistic rollout, but none of the repair strategies tested provides a parameter-efficiency or compute-efficiency advantage over a compact unconstrained neural baseline on this cohort.
+
+The four PIML repair strategies differ in informative ways. \emph{In-scaffold} learning (positions 2 and 3) keeps the mechanistic ODE structurally intact and replaces one or three physical rate relations with bounded learned MLPs. The single-closure variant (replacing only the heat-transfer coefficient) lifts the rollout from $R^2 = -0.44$ to $0.70$; adding learned moisture and reaction rates lifts it further to $0.94$. The improvement from single- to multi-closure is large ($+0.24$ R$^2$) and indicates that the mechanistic baseline's rollout deficit on production data is not concentrated in any single closure but is distributed across the moisture-loss and reaction kinetics as well. The cost of multi-closure repair is increased seed sensitivity: the range across three retraining seeds is $0.117$ R$^2$, with one seed under-converging substantially, compared to $0.006$ for the single-closure repair. Joint learning of three rate closures produces a more difficult optimization landscape than learning one.
+
+\emph{Out-of-scaffold} learning (positions 4 and 5) places a learned MLP on top of the mechanistic rollout as an additive correction, with or without a magnitude bound. The bounded variant reaches $R^2 = 0.90$ with 8{,}961 parameters; the unbounded variant reaches $R^2 = 0.92$ with 2{,}433 parameters. Both are seed-stable to within $0.01$ R$^2$. The headline finding here is that the physics-informed bound costs more than it buys: removing the bound improves predictive accuracy and lowers parameter count, because the bounded variant must spend capacity fighting the constraint to reach a similar trajectory. In this setting, a soft physics-as-correction prior is not a free benefit; the constraint actively shifts the model toward worse parameter efficiency.
+
+Taken together with the standalone neural baseline (705 parameters, $R^2 = 0.97$), the spectrum says that physics-informed repair is consistently effective at lifting the mechanistic baseline's rollout, but it is not parameter-efficient relative to an unconstrained neural baseline trained on the same drivers. Every PIML repair tested uses at least three times the parameters of the neural baseline and reaches lower predictive accuracy on the held-out roasts. The per-roast correlation structure adds a complementary perspective: the four PIML repairs share their hard roasts with one another (Pearson $r \approx 0.5$--$0.9$) while the neural baseline finds different roasts hard ($r \approx 0$). The same predictive ceiling is reached through structurally different per-roast failure profiles, consistent with the interpretation that the neural baseline is exploiting predictive signals correlated with the measured drivers that the mechanistic scaffold does not explicitly encode: empirical lags, probe dynamics, actuator effects, or other unmodeled relationships.
+
+The neural-baseline result should not be read as evidence that physical structure is unimportant. It shows that, for this metadata-indexed cohort and information set, routine measured telemetry contains enough empirical signal for a compact autoregressive map to learn accurate rollouts. That finding is compatible with the physics-informed repair results. The two answer different questions: the PIML models ask whether the mechanistic simulator can be repaired by adding learning at a specific position relative to the ODE, while the neural baseline asks how well an unconstrained empirical map can predict on the same inputs. Both are relevant for industrial modeling decisions, and the framing of this comparison (as a repair study on a metadata-limited production scaffold) is the regime where either is most plausibly worth deploying.
+
+The metadata-limited regime studied here is a deliberate experimental-design choice, not an accident of the dataset. The mechanistic scaffold reaches rollout $R^2 \approx 0.93$ on this cohort when literature priors for the unobserved initial states are supplied, which confirms that the published heat- and mass-transfer ODE is approximately correct in form on this telemetry. The metadata-limited regime evaluated above is constructed by withholding those priors, reproducing the typical situation in archival production records. This design lets the PIML-repair comparison ask a single clean question: how well does each strategy compensate for missing initialization of an otherwise correct physical scaffold? Because the underlying physics is favorable to PIML, this regime is the setting where physics-informed repair has its best chance against an unstructured neural baseline. The headline finding (that PIML repair does not beat a matched-input neural baseline) is therefore stronger than it would be in a less favorable regime: if PIML cannot beat the neural baseline here, the gap is plausibly worse in cases where the mechanistic form itself is mis-specified. A symmetric caveat applies to the neural baseline. In settings where the empirical signal in the measured drivers is weaker or noisier, the unconstrained baseline may also degrade, and this study cannot determine which method's degradation is steeper. Transfer of the headline ordering to other industrial processes therefore depends on which side of the trade has more room to lose.
+
+Several limitations bound the interpretation. The reported results are within-cohort held-out rollouts, not plant transfer, recipe transfer, or counterfactual control validation. The fitted models are not a general-purpose solution for arbitrary coffee roasters: by premise, every effective parameter and every per-roast initialization in the mechanistic scaffold is identified from this cohort's telemetry rather than from per-roaster metadata, so the fitted closures and residual corrections absorb roaster-specific configuration (drum geometry, sensor placement, gas ducting, actuator calibration) along with the underlying physics. Transferring any of the model classes to a different roaster setup would require refitting on telemetry from that setup; this is consistent with, not contrary to, the study's framing, because the comparison is between PIML repair positions on a fixed roaster configuration rather than across configurations. The neural-baseline family is intentionally compact and should not be treated as an exhaustive comparison against all sequence models. The mechanistic scaffold uses a lumped model with learned effective parameters and unobserved state initialization, so the learned closure should not be interpreted as a directly measured physical heat-transfer coefficient. The hyperparameter search spaces for the in-scaffold and residual models excluded the smallest tested batch size for compute reasons, and a single-trial probe at that smaller batch size on the single-closure PI reached a validation R$^2$ comparable to the multi-closure result, suggesting that a fuller bs=8 sweep would also approach the in-scaffold PIML ceiling, without changing the headline neural-baseline comparison. Finally, production records do not expose all variables that would be desirable for mechanistic identification, including complete per-run mass and machine-state information.
+
+Within those limits, the contribution is a constructive characterization of the PIML repair landscape on production data, in a regime where the underlying physics is approximately correct in form and only the run-specific initialization is missing. Physics-informed scaffolding consistently lifts the mechanistic rollout, and the position of the learned MLP relative to the ODE shapes the resulting tradeoff between predictive accuracy, parameter efficiency, seed reproducibility, and per-roast failure structure. The matched-input neural baseline remains the most parameter-efficient predictor; the PIML repairs remain the only way to recover a usable mechanistic simulator. Practitioners deciding between approaches should evaluate both, because the gap between them quantifies which predictive dynamics fall outside the chosen physical scaffold under their data constraints, and because that gap is likely to widen rather than close as the physical scaffold becomes less validated.
+
+\section*{Methods}
+
+The Methods first define the roasting process context and telemetry signals, then describe preprocessing, cohort eligibility, model classes, training, and evaluation. This order separates the physical meaning of the measured variables from the empirical comparisons reported above.
+
+\subsection*{Roasting process and telemetry context}
+
+Coffee roasting is used here as a case study in partially observed industrial thermal-process modeling rather than as an end-use coffee-quality experiment. The following process context is included to define the measured output, the operating variables supplied to the models, and the charge-to-dump window retained for rollout evaluation.
+
+In a production coffee roast, green coffee beans are charged into a preheated rotating drum and heated by hot process air, contact with the drum, and mixing within the moving bean bed, as shown in Figure~\ref{fig:roast_process}. Operators are ultimately interested in the final roasted coffee, including its sensory and chemical properties, but those quantities were not measured directly in the routine telemetry archive used here. Instead, the available process record centers on temperature trajectories, which are commonly used by roasters to define and reproduce roast profiles~\cite{rao2014,schwartzberg2002}. The primary measured output in this study is the bean-probe temperature, denoted $T_c$, recorded by a sensor positioned near the bulk bean bed and used here as the observable roast-profile signal.
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=\linewidth]{figures/roaster_schematic_2.png}
+\caption{Schematic overview of the industrial coffee-roasting system used as the thermal-process identification case study. Green coffee is charged from the hopper into a preheated rotating drum, where it is heated by recirculating hot process air and by contact with the drum and bean bed. The study focuses on the drum-roasting phase and associated telemetry, especially the bean-probe temperature signal used as the observable process output; downstream equipment such as the cyclone, cooling tray, and destoner is shown only for process context. Image adapted from IMA documentation~\cite{ima_use_nodate}.}
+\label{fig:roast_process}
+\end{figure}
+\FloatBarrier
+
+The measured probe trajectory has a characteristic shape. Immediately after charge, $T_c$ typically decreases as the cooler beans, probe, and drum environment thermally equilibrate. The subsequent minimum is commonly referred to as the turning point. After the turning point, the measured profile rises toward the operator-defined endpoint, or dump, when the beans leave the drum for cooling. Moisture evaporation and later exothermic reactions affect the thermal trajectory, but these internal states are not directly observed in the available telemetry.
+
+The experiments therefore model the measured bean-probe trajectory, not flavor, roast color, or chemical composition. In the available production archive, target temperature trajectories function as operational recipes: the modeling task is to reproduce the measured roast profile that operators use to monitor and compare batches~\cite{rao2014}. The modeled sequences retain the charge-to-dump interval, including the charge-drop transient and turning point, while excluding pre-charge warmup and post-dump cooling. Figure~\ref{fig:roast_profile_preprocessing} summarizes the typical telemetry shape and retained modeling window.
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=\linewidth]{figures/roast_profile_preprocessing_schematic.pdf}
+\caption{Schematic roasting profile and preprocessing window used in the experiments. The measured bean-probe temperature $T_c$ is the modeled output. The latent bean-temperature curve is included only as process context and is not directly measured in the production telemetry. Pre-charge warmup and post-dump cooling are excluded from the model sequences, while the charge-drop transient, turning point, and later roast development are retained in the charge-to-dump modeled window. Crack markers indicate common roast-stage landmarks rather than inputs used by the reported models.}
+\label{fig:roast_profile_preprocessing}
+\end{figure}
+\FloatBarrier
+
+\subsection*{Telemetry variables and preprocessing}
+
+The raw production records contain time-stamped roaster tags exported from industrial plant telemetry. Raw tag names were normalized to a canonical schema before modeling. The supervised output was \texttt{tc}, reported in the manuscript as $T_c$, the measured bean-probe or core control temperature. The core driver variables were \texttt{t2}, \texttt{air\_speed}, and \texttt{drum\_speed}, reported as $T_2$, $v_g$, and $TT$. Here $T_2$ is the roasting-air temperature entering the drum after burner heating and fresh-air/recirculated-air mixing; $v_g$ is the measured air-speed signal used to form the gas-side flow term; and $TT$ is the drum rotation speed, used as an observable proxy for bean mixing and heat-transfer regime. Raw records could contain additional plant tags, but only the variables listed here were used in the reported models.
+
+Each roast was converted into one time-ordered sequence. Rows with missing required signals were excluded, and roasts shorter than 20 samples after preprocessing were not modeled. Each roast was then trimmed automatically to the bean-charge-to-dump modeled window using measured $T_c$ trajectory features. The trimming rule detected the sustained charge-drop event and the later terminal cooling drop, removing machine warmup before charge and final dump cooling while retaining the charge-drop cooling transient and subsequent roast development. As shown schematically in Figure~\ref{fig:roast_profile_preprocessing}, the modeled window therefore corresponds to the in-drum roast phase evaluated in autonomous rollout. The trimming rule used measured telemetry only and was applied before model training and evaluation.
+
+All splits were made by whole roast using a deterministic md5 hash of the roast identifier. Thus all rows from a roast remain in exactly one of train, validation, or held-out test, and no row-level random split is used. The same split logic was used for the physics-based models and the neural baseline.
+
+\subsection*{Cohort eligibility and production benchmark}
+
+The production archive was not treated as a uniformly complete modeling dataset. Records were first screened for the fields required by the reported analyses. The canonical minimum schema for production model loading required parseable \texttt{timestamp}, \texttt{tc}, \texttt{t1}, \texttt{t2}, \texttt{flow\_gas}, \texttt{drum\_speed}, and \texttt{air\_speed}. The mechanistic, physics-informed, and residual-on-physics-informed comparisons used these same loaded roast sequences. The matched-input neural baseline used the previous \texttt{tc} together with the core drivers \texttt{t2}, \texttt{air\_speed}, and \texttt{drum\_speed}.
+
+The metadata index was used to retain one archived source bucket, \texttt{p2}, and three recurring roast labels, P10, P13, and P16, parsed from roast identifiers. This restriction was fixed before model fitting and was used to keep the production configuration and telemetry semantics comparable across roasts. In particular, it reduces confounding from unobserved differences such as machine configuration, ducting, sensor placement, and the physical meaning of measured air-speed and actuator channels. The resulting benchmark should therefore be interpreted as a within-configuration held-out-roast comparison, not as a test of transfer across source buckets, machines, or materially different telemetry contexts.
+
+Of 300 archived CSV files discovered, 297 were normalized successfully and passed schema, row, and length checks. Applying the source-bucket and roast-label filters retained 221 routine production roasts. Optional fields such as \texttt{batch\_mass\_kg}, \texttt{recipe\_number}, \texttt{t3}, and \texttt{set\_bf} were retained when available but were not required for inclusion in the reported production comparison. When \texttt{set\_bf} was missing, the loader used \texttt{flow\_gas} as the burner-command proxy. Explicit per-roast \texttt{batch\_mass\_kg} values were not available for the selected production cohort, so the mechanistic models used their fitted global effective-mass parameter rather than a roast-specific mass label.
+
+After charge-to-dump trimming and deterministic whole-roast hash splitting, the final 221-roast benchmark contained 150 training roasts, 35 validation roasts, and 36 held-out test roasts.
+
+\subsection*{Model classes}
+
+All models predict the next measured bean-probe temperature and are evaluated as autonomous simulators. The mechanistic and physics-informed models share the same state-space scaffold, derived from roasting heat- and mass-transfer models~\cite{schwartzberg2002,vosloo2017,putranto2012,hernandez2007,fabbri2011}. The latent state is
+\[
+x = \begin{bmatrix} T_b & X_b & H_e & T_{rp} \end{bmatrix}^{\top},
+\]
+where $T_b$ is latent bean temperature, $X_b$ is bean moisture ratio, $H_e$ is accumulated exothermic energy state, and $T_{rp}$ is the model probe state compared against the measured probe signal $T_c$.
+
+At each step, the measured inlet-air temperature $T_{gi}=T_2$ drives a lumped gas-to-bean exchange relation
+\[
+T_{go}=T_{gi}-(T_{gi}-T_b)\left(1-\exp\left(-\frac{h_e A_b}{G_g c_{pg}}\right)\right),
+\qquad
+G_g=A_{\mathrm{air}}\rho_g v_g,
+\]
+where $T_{go}$ is latent outlet-air temperature, $A_b$ is effective bean contact area, and $G_g$ is gas-side mass flow. The latent-state dynamics are then
+\[
+\dot{X}_b=-k_X X_b^2 \exp\!\left(-\frac{E_X}{T_b+273.15}\right),
+\qquad
+\dot{H}_e=A_r \exp\!\left(-\frac{E_r}{T_b+273.15}\right)\frac{H_{e,\mathrm{tot}}-H_e}{H_{e,\mathrm{tot}}},
+\]
+\[
+\dot{T}_b=\frac{\phi_{gb}+\phi_r-\phi_{ev}}{m_{b,\mathrm{dry}}(1+X_b)c_{pb}},
+\qquad
+\phi_{gb}=G_gc_{pg}(T_{gi}-T_{go}),
+\qquad
+\phi_r=m_{b,\mathrm{dry}}\dot{H}_e,
+\qquad
+\phi_{ev}=h_v(-\dot{X}_b)m_{b,\mathrm{dry}},
+\]
+\[
+\dot{T}_{rp}=k_p(T_b-T_{rp}),
+\]
+and the system is discretized with the measured sample interval $\Delta t$ for each roast. The mechanistic and physics-informed models both learn the same global scale parameters around this scaffold, including moisture and exothermic kinetics, probe lag, air-contact area, effective bean mass, and initial-state offsets. A small initialization network maps the first-sample values $(T_c,T_1,T_2,\texttt{flow\_gas},v_g,TT)$ to offsets for the latent initial state using a $6 \rightarrow 32 \rightarrow 4$ tanh network initialized to zero output. The only structural difference between the mechanistic and physics-informed variants is the effective heat-transfer closure $h_e$.
+
+The mechanistic baseline uses one positive constant closure, $h_e = \exp(\ell_h)$, and has no closure MLP. Its trainable components are 13 scalar physical parameters (heat-transfer coefficient $\ell_h$, effective bean-contact area, effective bean mass, moisture-rate and reaction-rate kinetic prefactors and activation energies, probe time-constant, heat of vaporization, total reaction heat, an initial bean-temperature offset, and an initial-moisture logit) and the shared $6\to32\to4$ initialization network described above (356 weights and biases). All scalars are initialized at literature default values; the initialization network is zero-initialized; neither is regularized toward those defaults during training. The total trainable parameter count is 369. This is the regime referred to as ``without literature priors'' in the Results: neither the scalar physical parameters nor the per-roast initial latent states are anchored to literature. The priors-equipped positive control referenced in the Results (rollout $R^2 \approx 0.93$) corresponds to a variant of the same model with the initial bean temperature and initial bean moisture fixed at literature defaults (20$^\circ$C and 0.12, respectively), the initialization network frozen at zero output, and only the remaining 11 scalar physical parameters trained; trajectories and per-roast metrics for this variant are released alongside the manuscript assets. The two repair strategies that place a learned MLP \emph{inside} the mechanistic ODE follow the established hybrid / closure-learning pattern in chemical and process engineering~\cite{psichogios1992,vonStosch2014}, recently formalized in the SciML community as Universal Differential Equations~\cite{rackauckas2020universal}. The single-closure physics-informed model keeps the same state evolution but replaces $h_e$ with a bounded state-dependent learned closure
+\[
+h_e=\mathrm{clip}\!\left(h_0\exp\!\left(1.5\tanh\!\big(f_{\theta}(\tilde{T}_g,\tilde{v}_g,\widetilde{TT})\big)\right),\,1,\,250\right),
+\]
+where $f_{\theta}$ is a ReLU feedforward MLP acting on fixed normalized inputs $\tilde{T}_g=(T_g-250)/120$, $\tilde{v}_g=v_g/10$, and $\widetilde{TT}=TT/35$. Here $T_g$ is the internal gas-temperature proxy supplied by the mechanistic rollout. The MLP hidden architecture is selected by the hyperparameter sweep described below.
+
+The multi-closure physics-informed model extends this in-scaffold strategy by additionally replacing the moisture-loss rate $\dot{X}_b$ and the exothermic reaction rate $\dot{H}_e$ with bounded learned MLPs:
+\[
+\dot{X}_b = -s_X \cdot \mathrm{softplus}\!\big(g_{\phi}(\tilde{X}_b,\tilde{T}_b)\big),
+\qquad
+\dot{H}_e = s_H \cdot \mathrm{softplus}\!\big(h_{\psi}(\widetilde{H}_e,\tilde{T}_b)\big) \cdot (1 - \widetilde{H}_e),
+\]
+where $g_{\phi}$ and $h_{\psi}$ are ReLU MLPs operating on normalized states, and the scale factors $s_X, s_H$ are set so that the zero-initialized network produces rates at the literature default magnitude. The softplus ensures sign correctness (moisture loss is non-positive, reaction energy is non-negative), and the $(1 - \widetilde{H}_e)$ multiplier prevents accumulated reaction state from exceeding the total exothermic capacity $H_{e,\mathrm{tot}}$. The architecture of each MLP is selected independently by the hyperparameter sweep.
+
+The two residual strategies leave the mechanistic ODE unchanged and add a learned additive correction on top of the rollout, in the tradition of model-discrepancy modeling and hybrid semi-parametric models~\cite{kennedy2001bayesian,vonStosch2014}. In the bounded FF residual model, at each step a feedforward MLP receives the current corrected probe temperature and the same measured drivers $(T_2, v_g, TT)$ used by the matched-input neural baseline. Its output is a bounded delta
+\[
+\delta_t = \mathrm{max\_delta} \cdot \tanh\!\big(r_{\chi}(\tilde{T}_c, \tilde{T}_2, \tilde{v}_g, \widetilde{TT})\big),
+\]
+where the bound $\mathrm{max\_delta}$ is a swept hyperparameter (selected from $\{12, 18, 24\}$~K) and the corrected temperature $T_c + \delta_t$ is additionally clipped to $[0, 300]^\circ$C as a numerical safeguard. The unbounded FF residual model uses the same architecture and inputs but removes the $\mathrm{max\_delta} \cdot \tanh$ saturation, so the additive correction can take any real value. The two residual variants test the effect of enforcing a physics-informed constraint on the residual magnitude.
+
+The matched-input neural baseline is a feedforward MLP with no mechanistic scaffold. Its inputs at each step are the previous probe temperature and the same core drivers $(T_2, v_g, TT)$; its output is the next $T_c$ predicted directly. The hidden-layer widths are selected by the hyperparameter sweep. The comparison axis between this baseline and the physics-informed repair strategies is therefore where the learned MLP plugs in: nowhere (mechanistic), inside the ODE (single- or multi-closure), on top of the ODE rollout as a bounded or unbounded additive correction (residual variants), or standalone (neural baseline).
+
+Table~\ref{tab:model_capacity} summarizes the principal learned neural components after hyperparameter selection. The counts are included to clarify that the neural-baseline advantage is not a comparison between a large empirical network and a much smaller physics-informed closure; in fact, the matched-input neural baseline that wins the sweep has more than an order of magnitude fewer neural parameters than the physics-informed closure. They count neural weights and biases in the listed components and exclude scalar physical parameters, fixed normalization constants, and optimizer state.
+
+\begin{table}[ht]
+\centering
+\small
+\begin{tabular}{|p{0.36\linewidth}|p{0.38\linewidth}|c|}
+\hline
+Model component & Architecture & Neural parameters \\
+\hline
+Shared initial-state network (all PI variants) & $6 \rightarrow 32 \rightarrow 4$ & 356 \\
+PI single-closure MLP ($h_e$) & $3 \rightarrow 128 \rightarrow 64 \rightarrow 32 \rightarrow 1$ & 10{,}881 \\
+Multi-closure PI: $h_e$ MLP & $3 \rightarrow 128 \rightarrow 64 \rightarrow 32 \rightarrow 1$ & 10{,}881 \\
+Multi-closure PI: moisture-rate MLP & $2 \rightarrow 32 \rightarrow 16 \rightarrow 1$ & 641 \\
+Multi-closure PI: reaction-rate MLP & $2 \rightarrow 64 \rightarrow 32 \rightarrow 1$ & 2{,}273 \\
+Bounded FF residual MLP & $4 \rightarrow 128 \rightarrow 64 \rightarrow 1$ & 8{,}961 \\
+Unbounded FF residual MLP & $4 \rightarrow 64 \rightarrow 32 \rightarrow 1$ & 2{,}433 \\
+Matched-input neural baseline MLP & $4 \rightarrow 32 \rightarrow 16 \rightarrow 1$ & 705 \\
+\hline
+\end{tabular}
+\caption{Neural parameter counts for the learned components after hyperparameter selection. Architectures are the winning configurations from each model class's 40-trial validation-rollout random search. Every learned component is a feedforward MLP; the comparison axis in Table~\ref{tab:rollout_summary} is therefore where the MLP plugs in relative to the mechanistic ODE, not what kind of network is used. The mechanistic and physics-informed scaffolds additionally include $\sim$13 learned scalar physical parameters (initial-state offsets, effective contact area, kinetic prefactors and activation energies, probe time-constant, heat of vaporization, total reaction heat); those scalars are not included in the counts above.}
+\label{tab:model_capacity}
+\end{table}
+
+\subsection*{Training and evaluation}
+
+The mechanistic, physics-informed, and residual models were trained autoregressively on trimmed roast trajectories. The first trimmed sample supplied the initial condition, and all later samples contributed to the loss. During rollout, each model used its own previous prediction rather than the true previous measured probe temperature; the measured driver sequence for that roast was still supplied at each step. For the matched-input comparison, the physics-informed model and the neural baseline therefore receive the same per-step $(T_2,v_g,TT)$ sequence from the held-out roast while generating their own temperature trajectory.
+
+For the neural baseline, input and target standardization parameters were fit on training roasts only and reused unchanged for validation and held-out roasts; zero-variance standard deviations were replaced with 1.0. The physics-informed closure used the fixed affine scaling shown above for $(T_g,v_g,TT)$ and did not use split-fitted feature moments. All learned models were selected by lowest validation loss across epochs rather than final-epoch weights, and used Adam with gradient clipping at norm 1.0.
+
+The primary metric is held-out autonomous rollout $R^2$. The first trimmed sample initializes the roast and the model's own previous prediction is recursively fed back at each later step. For the held-out test set, 95\% bootstrap intervals were obtained by resampling held-out roasts with replacement 1{,}000 times and recomputing the pooled rollout metric on each resample~\cite{efron1979}. Roast-level comparisons were summarized with paired win counts, median paired $R^2$ deltas, Wilcoxon signed-rank tests~\cite{wilcoxon1945}, and rank-biserial effect sizes. Representative rollout panels were selected deterministically as the longest held-out roast in the test set, not by visual quality.
+
+\subsection*{Hyperparameter selection}
+
+To make the comparison defensible against the concern that a model class might be disadvantaged by an unfortunate hyperparameter choice, each of the six model classes in Table~\ref{tab:rollout_summary} was tuned independently using a fixed-seed random search over its own per-class search space. Selection used pooled rollout $R^2$ on the validation split only; the held-out test split was not consulted during search. For every class we sampled 40 trials, trained each trial at a sweep-time epoch cap of 100 with validation-loss patience 15, and ranked trials by validation rollout $R^2$ at seed 11. The winning configuration was then retrained at the manuscript-canonical training budget (300 epochs with patience 30 for the mechanistic, physics-informed closure, and multi-closure variants; 200 epochs with patience 25 for the residual variants and the neural baseline) across seeds 11, 23, and 37 to populate the seed-stability ranges reported above and the headline values in Table~\ref{tab:rollout_summary}. The seed-11 retrain is the headline number; the other two seeds populate the stability statistics. The residual sweeps used the seed-11 retrained physics-informed checkpoint as the frozen base; the final residual evaluation at seeds 23 and 37 was stacked on the seed-matched physics-informed retrain so that residual and base were trained at the same random seed.
+
+The six search spaces were as follows. The matched-input neural baseline sampled hidden architectures from $\{$$(32,16)$, $(64,32)$, $(128,64)$, $(64,32,16)$, $(128,64,32)$, $(256,128,64)$$\}$, learning rate log-uniformly in $[10^{-4},\,3\times10^{-3}]$, weight decay from $\{0,\,10^{-5},\,10^{-4}\}$, batch size from $\{16,\,32,\,64,\,\text{full}\}$, and dropout from $\{0,\,0.1\}$. The single-closure physics-informed model sampled hidden architectures for the $h_e$ MLP from $\{$$(64,32)$, $(128,64,32)$, $(256,128,64,32)$, $(128,64)$, $(64,64,64)$$\}$, learning rate log-uniformly in $[10^{-4},\,2\times10^{-3}]$, weight decay from $\{10^{-6},\,10^{-5},\,10^{-4}\}$, and batch size from $\{16,\,32\}$. The mechanistic baseline has no closure MLP, so only the training schedule was searched: learning rate log-uniformly in $[10^{-4},\,2\times10^{-3}]$, weight decay from $\{10^{-6},\,10^{-5},\,10^{-4}\}$, and batch size from $\{16,\,32\}$.
+
+The multi-closure physics-informed model sampled three independent hidden architectures: the $h_e$ MLP from $\{$$(64,32)$, $(128,64,32)$, $(128,64)$, $(64,64,64)$$\}$, and the moisture-rate and reaction-rate MLPs each independently from $\{$$(16,8)$, $(32,16)$, $(64,32)$$\}$; learning rate log-uniformly in $[10^{-4},\,2\times10^{-3}]$, weight decay from $\{10^{-6},\,10^{-5},\,10^{-4}\}$, and batch size from $\{16,\,32\}$. The bounded FF residual sampled hidden architecture from $\{$$(16,8)$, $(32,16)$, $(64,32)$, $(32,16,8)$, $(64,32,16)$, $(128,64)$$\}$, output bound $\mathrm{max\_delta}$ from $\{12,\,18,\,24\}$~K, residual-penalty weight log-uniformly in $[3\times10^{-4},\,3\times10^{-3}]$, learning rate log-uniformly in $[2\times10^{-4},\,10^{-3}]$, weight decay from $\{10^{-6},\,10^{-5},\,10^{-4}\}$, and batch size from $\{16,\,32\}$. The unbounded FF residual used the identical search space except with $\mathrm{max\_delta}$ fixed at a numerically large value so the $\tanh$ saturation never effectively bounds the correction. Smaller batch sizes ($\mathrm{bs}=8$) were excluded from the physics-informed and residual search spaces for compute reasons; an exploratory single-trial probe at $\mathrm{bs}=8$ on the single-closure PI is reported in the supplementary material.
+
+Per-trial logs (full epoch-wise training and validation loss, best-epoch index, per-roast validation $R^2$, wall time, and full configuration) were written to JSON for every trial in every class. Accompanying diagnostic figures comparing parameter efficiency, hyperparameter sensitivity, convergence dynamics, and per-roast hardness across classes are released with the public repository alongside the per-trial logs.
+
+\subsection*{Use of generative AI tools}
+
+This article is based on thesis research conducted and written by M.P. Generative AI tools, including OpenAI language-model tools, were used during manuscript preparation for editorial assistance, organization, and critical review support. All AI-assisted text, code-review suggestions, and manuscript revisions were reviewed, verified, and edited by M.P. to ensure that the final manuscript represents the authors' own analysis, interpretation, and scientific judgment. No AI tool is listed as an author, and the authors take full responsibility for the accuracy, originality, and integrity of the submitted work.
+
+\section*{Data availability}
+
+The data used for the manuscript analyses, including the de-identified roast time-series inputs, metadata used for cohort construction and splitting, derived result tables, seed-stability summaries, and manuscript figure source data, are available in the public repository at \url{https://github.com/MorgenPronk/physics-informed-roast-rollout-comparison.git}. The repository also contains the deterministic split logic and fixed-command reproduction notes needed to regenerate the reported tables and figures. Any partner- or plant-identifying labels in the original industrial exports have been removed or replaced with neutral identifiers before release; these redactions do not affect the variables, splits, or metrics reported in the manuscript.
+
+\section*{Code availability}
+
+The sanitized public repository for this manuscript is available at the \href{https://github.com/MorgenPronk/physics-informed-roast-rollout-comparison.git}{GitHub repository}: \url{https://github.com/MorgenPronk/physics-informed-roast-rollout-comparison.git}. It contains the model implementation, experiment runners, manuscript-asset builders, fixed-command reproducibility notes, and LaTeX sources required to regenerate the reported manuscript outputs from released sanitized derived assets. The review package accompanying this manuscript contains the same manuscript-facing materials used for editorial review, including the long-run experiment summaries, seed-stability summaries, and figure-building scripts referenced in the paper.
+
+\section*{Acknowledgements}
+
+The authors thank the collaborators and data providers who enabled access to the experimental and production roast records analyzed in this study.
+
+\section*{Author contributions statement}
+
+M.P. designed the study, implemented the experiments, analyzed the results, and drafted the manuscript. B.W.A. supervised the study, interpreted the results, and revised the manuscript. Both authors reviewed and approved the final manuscript.
+
+\section*{Additional information}
+
+\textbf{Competing interests} The authors declare no competing interests.
+
+\bibliography{references}
+
+\end{document}

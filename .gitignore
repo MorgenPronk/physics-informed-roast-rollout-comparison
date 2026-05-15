@@ -1,0 +1,49 @@
+﻿# Python cache
+__pycache__/
+*.pyc
+
+# Environments
+.venv/
+venv/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+
+# Generated outputs
+data/interim/normalized/
+data/processed/*
+!data/processed/.gitkeep
+data/metadata/data_manifest.csv
+data/metadata/normalized_files.csv
+data/metadata/normalized_files_*.csv
+reports/figures/*
+!reports/figures/.gitkeep
+reports/tables/*
+!reports/tables/.gitkeep
+reports/experiments/
+artifacts/experiments/
+thesis_extracted.txt
+
+# Local OS files
+.DS_Store
+Thumbs.db
+
+# Local thesis and journal source bundles (keep local, do not publish)
+Thesis/
+Scientific Reports Journal Paper/
+
+# Claude Code local settings and worktrees (not part of the public release)
+.claude/
+
+# Temporary editor/system files
+/tmp/

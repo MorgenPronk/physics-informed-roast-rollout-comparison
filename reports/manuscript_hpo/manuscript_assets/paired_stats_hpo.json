@@ -1,0 +1,23 @@
+{
+  "seed": 11,
+  "blackbox_core_vs_greybox": {
+    "n_roasts": 36,
+    "median_delta_r2": 0.21012499359951492,
+    "competitor_wins": 36,
+    "ties": 0,
+    "wilcoxon_statistic": 666.0,
+    "wilcoxon_p_value": 1.4551915228366852e-11,
+    "wilcoxon_alternative": "greater (competitor > greybox)",
+    "wilcoxon_error": null
+  },
+  "residual_vs_greybox": {
+    "n_roasts": 36,
+    "median_delta_r2": 0.20219030617444428,
+    "competitor_wins": 36,
+    "ties": 0,
+    "wilcoxon_statistic": 666.0,
+    "wilcoxon_p_value": 1.4551915228366852e-11,
+    "wilcoxon_alternative": "greater (competitor > greybox)",
+    "wilcoxon_error": null
+  }
+}

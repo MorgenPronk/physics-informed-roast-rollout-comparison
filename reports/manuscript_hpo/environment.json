@@ -1,0 +1,11 @@
+{
+  "python": "3.12.4 (tags/v3.12.4:8e8a4ba, Jun  6 2024, 19:30:16) [MSC v.1940 64 bit (AMD64)]",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "numpy": "2.2.6",
+  "pandas": "2.2.3",
+  "torch": "2.7.0+cu128",
+  "cuda_available": true,
+  "cuda_device": "NVIDIA GeForce RTX 4050 Laptop GPU",
+  "git_sha": "3484eede3ddb8f4ed337f44bac72065e011b0f6e",
+  "git_dirty": true
+}
