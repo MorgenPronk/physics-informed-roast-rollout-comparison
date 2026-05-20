@@ -192,24 +192,24 @@ After charge-to-dump trimming and deterministic whole-roast hash splitting, the 
 \subsection*{Model classes}
 
 All models predict the next measured bean-probe temperature and are evaluated as autonomous simulators. The mechanistic and physics-informed models share the same state-space scaffold, derived from roasting heat- and mass-transfer models~\cite{schwartzberg2002,vosloo2017,putranto2012,hernandez2007,fabbri2011}. The latent state is
-\[
+\begin{equation}\label{eq:state}
 x = \begin{bmatrix} T_b & X_b & H_e & T_{rp} \end{bmatrix}^{\top},
-\]
+\end{equation}
 where $T_b$ is latent bean temperature, $X_b$ is bean moisture ratio, $H_e$ is accumulated exothermic energy state, and $T_{rp}$ is the model probe state compared against the measured probe signal $T_c$.
 
 At each step, the measured inlet-air temperature $T_{gi}=T_2$ drives a lumped gas-to-bean exchange relation
-\[
+\begin{equation}\label{eq:gas_exchange}
 T_{go}=T_{gi}-(T_{gi}-T_b)\left(1-\exp\left(-\frac{h_e A_b}{G_g c_{pg}}\right)\right),
 \qquad
 G_g=A_{\mathrm{air}}\rho_g v_g,
-\]
+\end{equation}
 where $T_{go}$ is latent outlet-air temperature, $A_b$ is effective bean contact area, and $G_g$ is gas-side mass flow. The latent-state dynamics are then
-\[
+\begin{equation}\label{eq:kinetics}
 \dot{X}_b=-k_X X_b^2 \exp\!\left(-\frac{E_X}{T_b+273.15}\right),
 \qquad
 \dot{H}_e=A_r \exp\!\left(-\frac{E_r}{T_b+273.15}\right)\frac{H_{e,\mathrm{tot}}-H_e}{H_{e,\mathrm{tot}}},
-\]
-\[
+\end{equation}
+\begin{equation}\label{eq:temperature}
 \dot{T}_b=\frac{\phi_{gb}+\phi_r-\phi_{ev}}{m_{b,\mathrm{dry}}(1+X_b)c_{pb}},
 \qquad
 \phi_{gb}=G_gc_{pg}(T_{gi}-T_{go}),
@@ -217,31 +217,31 @@ where $T_{go}$ is latent outlet-air temperature, $A_b$ is effective bean contact
 \phi_r=m_{b,\mathrm{dry}}\dot{H}_e,
 \qquad
 \phi_{ev}=h_v(-\dot{X}_b)m_{b,\mathrm{dry}},
-\]
-\[
+\end{equation}
+\begin{equation}\label{eq:probe}
 \dot{T}_{rp}=k_p(T_b-T_{rp}),
-\]
-and the system is discretized with the measured sample interval $\Delta t$ for each roast. The mechanistic and physics-informed models both learn the same global scale parameters around this scaffold, including moisture and exothermic kinetics, probe lag, air-contact area, effective bean mass, and initial-state offsets. A small initialization network maps the first-sample values $(T_c,T_1,T_2,\texttt{flow\_gas},v_g,TT)$ to offsets for the latent initial state using a $6 \rightarrow 32 \rightarrow 4$ tanh network initialized to zero output. The only structural difference between the mechanistic and physics-informed variants is the effective heat-transfer closure $h_e$.
+\end{equation}
+and the system in equations~(\ref{eq:state})--(\ref{eq:probe}) is discretized with the measured sample interval $\Delta t$ for each roast. The mechanistic and physics-informed models both learn the same global scale parameters around this scaffold, including moisture and exothermic kinetics, probe lag, air-contact area, effective bean mass, and initial-state offsets. A small initialization network maps the first-sample values $(T_c,T_1,T_2,\texttt{flow\_gas},v_g,TT)$ to offsets for the latent initial state using a $6 \rightarrow 32 \rightarrow 4$ tanh network initialized to zero output. The only structural difference between the mechanistic and physics-informed variants is the effective heat-transfer closure $h_e$.
 
 The mechanistic baseline uses one positive constant closure, $h_e = \exp(\ell_h)$, and has no closure MLP. Its trainable components are 13 scalar physical parameters (heat-transfer coefficient $\ell_h$, effective bean-contact area, effective bean mass, moisture-rate and reaction-rate kinetic prefactors and activation energies, probe time-constant, heat of vaporization, total reaction heat, an initial bean-temperature offset, and an initial-moisture logit) and the shared $6\to32\to4$ initialization network described above (356 weights and biases). All scalars are initialized at literature default values; the initialization network is zero-initialized; neither is regularized toward those defaults during training. The total trainable parameter count is 369. This is the regime referred to as ``without literature priors'' in the Results: neither the scalar physical parameters nor the per-roast initial latent states are anchored to literature. The priors-equipped positive control referenced in the Results (rollout $R^2 \approx 0.93$) corresponds to a variant of the same model with the initial bean temperature and initial bean moisture fixed at literature defaults (20$^\circ$C and 0.12, respectively), the initialization network frozen at zero output, and only the remaining 11 scalar physical parameters trained; trajectories and per-roast metrics for this variant are released alongside the manuscript assets. The two repair strategies that place a learned MLP \emph{inside} the mechanistic ODE follow the established hybrid / closure-learning pattern in chemical and process engineering~\cite{psichogios1992,vonStosch2014}, recently formalized in the SciML community as Universal Differential Equations~\cite{rackauckas2020universal}. The single-closure physics-informed model keeps the same state evolution but replaces $h_e$ with a bounded state-dependent learned closure
-\[
+\begin{equation}\label{eq:single_closure}
 h_e=\mathrm{clip}\!\left(h_0\exp\!\left(1.5\tanh\!\big(f_{\theta}(\tilde{T}_g,\tilde{v}_g,\widetilde{TT})\big)\right),\,1,\,250\right),
-\]
+\end{equation}
 where $f_{\theta}$ is a ReLU feedforward MLP acting on fixed normalized inputs $\tilde{T}_g=(T_g-250)/120$, $\tilde{v}_g=v_g/10$, and $\widetilde{TT}=TT/35$. Here $T_g$ is the internal gas-temperature proxy supplied by the mechanistic rollout. The MLP hidden architecture is selected by the hyperparameter sweep described below.
 
 The multi-closure physics-informed model extends this in-scaffold strategy by additionally replacing the moisture-loss rate $\dot{X}_b$ and the exothermic reaction rate $\dot{H}_e$ with bounded learned MLPs:
-\[
+\begin{equation}\label{eq:multi_closure}
 \dot{X}_b = -s_X \cdot \mathrm{softplus}\!\big(g_{\phi}(\tilde{X}_b,\tilde{T}_b)\big),
 \qquad
 \dot{H}_e = s_H \cdot \mathrm{softplus}\!\big(h_{\psi}(\widetilde{H}_e,\tilde{T}_b)\big) \cdot (1 - \widetilde{H}_e),
-\]
+\end{equation}
 where $g_{\phi}$ and $h_{\psi}$ are ReLU MLPs operating on normalized states, and the scale factors $s_X, s_H$ are set so that the zero-initialized network produces rates at the literature default magnitude. The softplus ensures sign correctness (moisture loss is non-positive, reaction energy is non-negative), and the $(1 - \widetilde{H}_e)$ multiplier prevents accumulated reaction state from exceeding the total exothermic capacity $H_{e,\mathrm{tot}}$. The architecture of each MLP is selected independently by the hyperparameter sweep.
 
 The two residual strategies leave the mechanistic ODE unchanged and add a learned additive correction on top of the rollout, in the tradition of model-discrepancy modeling and hybrid semi-parametric models~\cite{kennedy2001bayesian,vonStosch2014}. In the bounded FF residual model, at each step a feedforward MLP receives the current corrected probe temperature and the same measured drivers $(T_2, v_g, TT)$ used by the matched-input neural baseline. Its output is a bounded delta
-\[
+\begin{equation}\label{eq:residual}
 \delta_t = \mathrm{max\_delta} \cdot \tanh\!\big(r_{\chi}(\tilde{T}_c, \tilde{T}_2, \tilde{v}_g, \widetilde{TT})\big),
-\]
-where the bound $\mathrm{max\_delta}$ is a swept hyperparameter (selected from $\{12, 18, 24\}$~K) and the corrected temperature $T_c + \delta_t$ is additionally clipped to $[0, 300]^\circ$C as a numerical safeguard. The unbounded FF residual model uses the same architecture and inputs but removes the $\mathrm{max\_delta} \cdot \tanh$ saturation, so the additive correction can take any real value. The two residual variants test the effect of enforcing a physics-informed constraint on the residual magnitude.
+\end{equation}
+where the bound $\mathrm{max\_delta}$ is a swept hyperparameter (selected from $\{12, 18, 24\}$~K) and the corrected temperature $T_c + \delta_t$ is additionally clipped to $[0, 300]^\circ$C as a numerical safeguard. The unbounded FF residual model uses the same architecture and inputs as in equation~(\ref{eq:residual}) but removes the $\mathrm{max\_delta} \cdot \tanh$ saturation, so the additive correction can take any real value. The two residual variants test the effect of enforcing a physics-informed constraint on the residual magnitude.
 
 The matched-input neural baseline is a feedforward MLP with no mechanistic scaffold. Its inputs at each step are the previous probe temperature and the same core drivers $(T_2, v_g, TT)$; its output is the next $T_c$ predicted directly. The hidden-layer widths are selected by the hyperparameter sweep. The comparison axis between this baseline and the physics-informed repair strategies is therefore where the learned MLP plugs in: nowhere (mechanistic), inside the ODE (single- or multi-closure), on top of the ODE rollout as a bounded or unbounded additive correction (residual variants), or standalone (neural baseline).
 
@@ -310,6 +310,149 @@ M.P. designed the study, implemented the experiments, analyzed the results, and 
 
 \textbf{Competing interests} The authors declare no competing interests.
 
-\bibliography{references}
+\begin{thebibliography}{10}
+\urlstyle{rm}
+\expandafter\ifx\csname url\endcsname\relax
+  \def\url#1{\texttt{#1}}\fi
+\expandafter\ifx\csname urlprefix\endcsname\relax\def\urlprefix{URL }\fi
+\expandafter\ifx\csname doiprefix\endcsname\relax\def\doiprefix{DOI: }\fi
+\providecommand{\bibinfo}[2]{#2}
+\providecommand{\eprint}[2][]{\url{#2}}
+
+\bibitem{ljung1999}
+\bibinfo{author}{Ljung, L.}
+\newblock \emph{\bibinfo{title}{System Identification: Theory for the User}}
+  (\bibinfo{publisher}{Prentice Hall}, \bibinfo{address}{Upper Saddle River,
+  NJ}, \bibinfo{year}{1999}), \bibinfo{edition}{2} edn.
+
+\bibitem{pillonetto2025}
+\bibinfo{author}{Pillonetto, G.} \emph{et~al.}
+\newblock \bibinfo{journal}{\bibinfo{title}{Deep networks for system
+  identification: A survey}}.
+\newblock {\emph{\JournalTitle{Automatica}}} \textbf{\bibinfo{volume}{171}},
+  \bibinfo{pages}{111907}, \doiprefix\url{10.1016/j.automatica.2024.111907}
+  (\bibinfo{year}{2025}).
+
+\bibitem{psichogios1992}
+\bibinfo{author}{Psichogios, D.~C.} \& \bibinfo{author}{Ungar, L.~H.}
+\newblock \bibinfo{journal}{\bibinfo{title}{A hybrid neural network-first
+  principles approach to process modeling}}.
+\newblock {\emph{\JournalTitle{AIChE Journal}}} \textbf{\bibinfo{volume}{38}},
+  \bibinfo{pages}{1499--1511}, \doiprefix\url{10.1002/aic.690381003}
+  (\bibinfo{year}{1992}).
+
+\bibitem{vonStosch2014}
+\bibinfo{author}{von Stosch, M.}, \bibinfo{author}{Oliveira, R.},
+  \bibinfo{author}{Peres, J.} \& \bibinfo{author}{Feyo~de Azevedo, S.}
+\newblock \bibinfo{journal}{\bibinfo{title}{Hybrid semi-parametric modeling in
+  process systems engineering: Past, present and future}}.
+\newblock {\emph{\JournalTitle{Computers \& Chemical Engineering}}}
+  \textbf{\bibinfo{volume}{60}}, \bibinfo{pages}{86--101},
+  \doiprefix\url{10.1016/j.compchemeng.2013.08.008} (\bibinfo{year}{2014}).
+
+\bibitem{karniadakis2021}
+\bibinfo{author}{Karniadakis, G.~E.} \emph{et~al.}
+\newblock \bibinfo{journal}{\bibinfo{title}{Physics-informed machine
+  learning}}.
+\newblock {\emph{\JournalTitle{Nature Reviews Physics}}}
+  \textbf{\bibinfo{volume}{3}}, \bibinfo{pages}{422--440},
+  \doiprefix\url{10.1038/s42254-021-00314-5} (\bibinfo{year}{2021}).
+
+\bibitem{rackauckas2020universal}
+\bibinfo{author}{Rackauckas, C.} \emph{et~al.}
+\newblock \bibinfo{title}{Universal differential equations for scientific
+  machine learning}, \doiprefix\url{10.48550/arXiv.2001.04385}
+  (\bibinfo{year}{2020}).
+\newblock \eprint{2001.04385}.
+
+\bibitem{kennedy2001bayesian}
+\bibinfo{author}{Kennedy, M.~C.} \& \bibinfo{author}{O'Hagan, A.}
+\newblock \bibinfo{journal}{\bibinfo{title}{Bayesian calibration of computer
+  models}}.
+\newblock {\emph{\JournalTitle{Journal of the Royal Statistical Society: Series
+  B (Statistical Methodology)}}} \textbf{\bibinfo{volume}{63}},
+  \bibinfo{pages}{425--464}, \doiprefix\url{10.1111/1467-9868.00294}
+  (\bibinfo{year}{2001}).
+
+\bibitem{schwartzberg2002}
+\bibinfo{author}{Schwartzberg, H.~G.}
+\newblock \bibinfo{title}{Modeling bean heating during batch roasting of coffee
+  beans}.
+\newblock In \emph{\bibinfo{booktitle}{Engineering and Food for the 21st
+  Century}}, \doiprefix\url{10.1201/9781420010169.ch52}
+  (\bibinfo{publisher}{CRC Press}, \bibinfo{year}{2002}).
+
+\bibitem{vosloo2017}
+\bibinfo{author}{Vosloo, J.}
+\newblock \bibinfo{title}{Heat and mass transfer model for a coffee roasting
+  process} (\bibinfo{year}{2017}).
+\newblock \bibinfo{note}{Master's thesis / report}.
+
+\bibitem{putranto2012}
+\bibinfo{author}{Putranto, A.} \& \bibinfo{author}{Chen, X.~D.}
+\newblock \bibinfo{journal}{\bibinfo{title}{Roasting of barley and coffee
+  modeled using the lumped-reaction engineering approach ({L-REA})}}.
+\newblock {\emph{\JournalTitle{Drying Technology}}}
+  \textbf{\bibinfo{volume}{30}}, \bibinfo{pages}{475--483},
+  \doiprefix\url{10.1080/07373937.2011.647185} (\bibinfo{year}{2012}).
+
+\bibitem{hernandez2007}
+\bibinfo{author}{Hern{\'a}ndez, J.~A.}, \bibinfo{author}{Heyd, B.},
+  \bibinfo{author}{Irles, C.}, \bibinfo{author}{Valdovinos, B.} \&
+  \bibinfo{author}{Trystram, G.}
+\newblock \bibinfo{journal}{\bibinfo{title}{Analysis of the heat and mass
+  transfer during coffee batch roasting}}.
+\newblock {\emph{\JournalTitle{Journal of Food Engineering}}}
+  \textbf{\bibinfo{volume}{78}}, \bibinfo{pages}{1141--1148},
+  \doiprefix\url{10.1016/j.jfoodeng.2005.12.041} (\bibinfo{year}{2007}).
+
+\bibitem{fabbri2011}
+\bibinfo{author}{Fabbri, A.}, \bibinfo{author}{Cevoli, C.},
+  \bibinfo{author}{Alessandrini, L.} \& \bibinfo{author}{Romani, S.}
+\newblock \bibinfo{journal}{\bibinfo{title}{Numerical modeling of heat and mass
+  transfer during coffee roasting process}}.
+\newblock {\emph{\JournalTitle{Journal of Food Engineering}}}
+  \textbf{\bibinfo{volume}{105}}, \bibinfo{pages}{264--269},
+  \doiprefix\url{10.1016/j.jfoodeng.2011.02.030} (\bibinfo{year}{2011}).
+
+\bibitem{rao2014}
+\bibinfo{author}{Rao, S.}
+\newblock \emph{\bibinfo{title}{The Coffee Roaster's Companion}}
+  (\bibinfo{publisher}{Scott Rao}, \bibinfo{year}{2014}).
+
+\bibitem{ima_use_nodate}
+\bibinfo{author}{{IMA}}.
+\newblock \bibinfo{title}{Use and maintenance instruction manual: Roaster {TMR}
+  25-125-250-400-660 {CA} - {GAS}}.
+
+\bibitem{efron1979}
+\bibinfo{author}{Efron, B.}
+\newblock \bibinfo{journal}{\bibinfo{title}{Bootstrap methods: Another look at
+  the jackknife}}.
+\newblock {\emph{\JournalTitle{The Annals of Statistics}}}
+  \textbf{\bibinfo{volume}{7}}, \bibinfo{pages}{1--26},
+  \doiprefix\url{10.1214/aos/1176344552} (\bibinfo{year}{1979}).
+
+\bibitem{wilcoxon1945}
+\bibinfo{author}{Wilcoxon, F.}
+\newblock \bibinfo{journal}{\bibinfo{title}{Individual comparisons by ranking
+  methods}}.
+\newblock {\emph{\JournalTitle{Biometrics Bulletin}}}
+  \textbf{\bibinfo{volume}{1}}, \bibinfo{pages}{80--83},
+  \doiprefix\url{10.2307/3001968} (\bibinfo{year}{1945}).
+
+\end{thebibliography}
+
+\section*{Figure legends}
+
+\noindent\textbf{Figure 1.} Position spectrum across the six model classes (Table~\ref{tab:rollout_summary}). \textbf{Top:} Held-out autonomous-rollout $R^2$ at seed 11 with 95\% roast-bootstrap CI. The mechanistic baseline anchors the spectrum near $R^2 = -0.44$; every PIML repair strategy lifts the rollout above $0.70$, and the matched-input neural baseline reaches the highest accuracy at $R^2 = 0.97$. \textbf{Middle:} Per-seed rollout $R^2$ across retraining seeds 11/23/37 with the range $\Delta$ annotated. The multi-closure PI is the highest-R$^2$ physics-informed repair but also the least seed-stable ($\Delta = 0.117$, one seed under-converging); both FF-residual variants are the tightest ($\Delta \le 0.008$). \textbf{Bottom:} Trainable-parameter count (log scale). Every PIML repair uses at least three times the parameters of the neural baseline. Colors mark the position of the MLP relative to the ODE: gray for none, blue for inside the ODE, orange for on top of the ODE rollout, green for standalone.
+
+\noindent\textbf{Figure 2.} Pearson correlation between per-roast rollout $R^2$ vectors across the six model classes (seed 11, 36 held-out test roasts). The four PIML repair strategies (rows/columns 2--5) form a high-correlation block ($r \approx 0.5$--$0.9$), indicating that they share their hard roasts with one another. The matched-input neural baseline (row/column 6) is the dark-band exception: its per-roast hardness is near-orthogonal to every PIML repair ($|r| \le 0.17$), so the two approaches reach a comparable predictive ceiling through structurally different per-roast failure profiles.
+
+\noindent\textbf{Figure 3.} Representative held-out rollout on the deterministic-longest test roast (seed 11) for all six model classes in the position spectrum (Table~\ref{tab:rollout_summary}). The measured bean-probe trace is shown in black. Mechanistic baseline (gray dotted) drifts substantially upward after the charge-drop transient. Within each repair location, the two variants are paired by linestyle: single-closure PI (dashed blue) and multi-closure PI (solid blue) for inside-the-ODE repair; bounded FF residual (dashed orange) and unbounded FF residual (solid orange) for on-top-of-ODE repair. The matched-input neural baseline (green) tracks the measured trajectory most closely. Per-roast rollout $R^2$ values for this specific roast are annotated in the legend and may differ from the cohort-pooled values in Table~\ref{tab:rollout_summary}.
+
+\noindent\textbf{Figure 4.} Schematic overview of the industrial coffee-roasting system used as the thermal-process identification case study. Green coffee is charged from the hopper into a preheated rotating drum, where it is heated by recirculating hot process air and by contact with the drum and bean bed. The study focuses on the drum-roasting phase and associated telemetry, especially the bean-probe temperature signal used as the observable process output; downstream equipment such as the cyclone, cooling tray, and destoner is shown only for process context. Image adapted from IMA documentation~\cite{ima_use_nodate}.
+
+\noindent\textbf{Figure 5.} Schematic roasting profile and preprocessing window used in the experiments. The measured bean-probe temperature $T_c$ is the modeled output. The latent bean-temperature curve is included only as process context and is not directly measured in the production telemetry. Pre-charge warmup and post-dump cooling are excluded from the model sequences, while the charge-drop transient, turning point, and later roast development are retained in the charge-to-dump modeled window. Crack markers indicate common roast-stage landmarks rather than inputs used by the reported models.
 
 \end{document}
