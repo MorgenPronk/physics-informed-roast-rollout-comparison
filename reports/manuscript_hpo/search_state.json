@@ -1,0 +1,189 @@
+{
+  "search_seed": 0,
+  "n_trials": 40,
+  "per_trial_seeds": [
+    11
+  ],
+  "final_seeds": [
+    11,
+    23,
+    37
+  ],
+  "include_p_codes": [
+    "P10",
+    "P13",
+    "P16"
+  ],
+  "include_source_buckets": [
+    "p2"
+  ],
+  "split_strategy": "md5",
+  "warmup_steps": 0,
+  "residual_base_seed": 11,
+  "search_space": {
+    "whitebox": {
+      "lr": {
+        "distribution": "log_uniform",
+        "low": 0.0001,
+        "high": 0.002
+      },
+      "weight_decay_choices": [
+        1e-06,
+        1e-05,
+        0.0001
+      ],
+      "batch_size_choices": [
+        16,
+        32
+      ],
+      "sweep_epochs": 100,
+      "sweep_patience": 15,
+      "final_epochs": 300,
+      "final_patience": 30,
+      "tgo_weight": 0.0,
+      "detach_state_steps": false,
+      "warmup_steps": 0,
+      "note": "white-box has no closure MLP; only training schedule is varied."
+    },
+    "blackbox": {
+      "hidden_widths_choices": [
+        [
+          32,
+          16
+        ],
+        [
+          64,
+          32
+        ],
+        [
+          128,
+          64
+        ],
+        [
+          64,
+          32,
+          16
+        ],
+        [
+          128,
+          64,
+          32
+        ],
+        [
+          256,
+          128,
+          64
+        ]
+      ],
+      "lr": {
+        "distribution": "log_uniform",
+        "low": 0.0001,
+        "high": 0.003
+      },
+      "weight_decay_choices": [
+        0.0,
+        1e-05,
+        0.0001
+      ],
+      "batch_size_choices": [
+        16,
+        32,
+        64,
+        "full"
+      ],
+      "dropout_choices": [
+        0.0,
+        0.1
+      ],
+      "sweep_epochs": 100,
+      "sweep_patience": 15,
+      "final_epochs": 200,
+      "final_patience": 25
+    },
+    "greybox": {
+      "hidden_widths_choices": [
+        [
+          64,
+          32
+        ],
+        [
+          128,
+          64,
+          32
+        ],
+        [
+          256,
+          128,
+          64,
+          32
+        ],
+        [
+          128,
+          64
+        ],
+        [
+          64,
+          64,
+          64
+        ]
+      ],
+      "lr": {
+        "distribution": "log_uniform",
+        "low": 0.0001,
+        "high": 0.002
+      },
+      "weight_decay_choices": [
+        1e-06,
+        1e-05,
+        0.0001
+      ],
+      "batch_size_choices": [
+        16,
+        32
+      ],
+      "sweep_epochs": 100,
+      "sweep_patience": 15,
+      "final_epochs": 300,
+      "final_patience": 30,
+      "tgo_weight": 0.0,
+      "detach_state_steps": false,
+      "warmup_steps": 0
+    },
+    "residual": {
+      "hidden_size_choices": [
+        32,
+        48,
+        64,
+        96
+      ],
+      "residual_weight": {
+        "distribution": "log_uniform",
+        "low": 0.0003,
+        "high": 0.003
+      },
+      "max_delta_choices": [
+        12.0,
+        18.0,
+        24.0
+      ],
+      "lr": {
+        "distribution": "log_uniform",
+        "low": 0.0002,
+        "high": 0.001
+      },
+      "weight_decay": 1e-05,
+      "batch_size": 16,
+      "sweep_epochs": 100,
+      "sweep_patience": 15,
+      "final_epochs": 200,
+      "final_patience": 25,
+      "warmup_steps": 0
+    }
+  },
+  "cohort_sizes": {
+    "train": 150,
+    "val": 35,
+    "test": 36,
+    "total": 221
+  }
+}

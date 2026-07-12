@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+title: "Where the MLP plugs in: a position-spectrum comparison of physics-informed repair strategies for industrial coffee roasting"
+message: If you use this repository or its results, please cite the manuscript and this software repository.
+type: software
+authors:
+  - family-names: Pronk
+    given-names: Morgen
+    affiliation: Massachusetts Institute of Technology
+    email: morgenpronk@alum.mit.edu
+  - family-names: Anthony
+    given-names: Brian W.
+    affiliation: Massachusetts Institute of Technology
+repository-code: https://github.com/MorgenPronk/physics-informed-roast-rollout-comparison
+license: MIT
+version: 1.0.0
+date-released: 2026-05-15

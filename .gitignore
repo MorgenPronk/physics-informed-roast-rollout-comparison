@@ -1,0 +1,62 @@
+﻿# Python cache
+__pycache__/
+*.pyc
+
+# Environments
+.venv/
+venv/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+*.synctex*
+
+# Partner telemetry and derived data: never publish (DUA; available on request)
+data/raw/*
+!data/raw/README.md
+data/interim/
+data/processed/*
+!data/processed/.gitkeep
+data/metadata/*
+!data/metadata/.gitkeep
+reports/figures/*
+!reports/figures/.gitkeep
+reports/tables/*
+!reports/tables/.gitkeep
+reports/experiments/
+artifacts/experiments/
+thesis_extracted.txt
+
+# Local OS files
+.DS_Store
+Thumbs.db
+
+# Local thesis and journal source bundles (keep local, do not publish)
+Thesis/
+Scientific Reports Journal Paper/
+
+# Submission correspondence (keep local, do not publish)
+manuscript/scientific_reports/cover_letter.md
+manuscript/scientific_reports/cover_letter_versions/
+manuscript/scientific_reports/response_to_reviewers*
+
+# Co-author review notes (keep local, do not publish)
+brian_*.txt
+
+# Claude Code local settings and worktrees (not part of the public release)
+.claude/
+
+# Temporary editor/system files
+/tmp/
+
+# Local release staging area (never commit; snapshot is published as its own repo)
+artifacts/
